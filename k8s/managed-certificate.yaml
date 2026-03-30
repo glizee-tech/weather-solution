@@ -1,0 +1,9 @@
+# Certificat TLS géré par Google (provisioning après que le DNS pointe vers l'IP de l'Ingress).
+# Remplace le domaine par le tien (même valeur que host dans ingress.yaml).
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: weather-planner-cert
+spec:
+  domains:
+    - weather-planner.example.com

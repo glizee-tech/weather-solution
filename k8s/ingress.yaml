@@ -1,0 +1,23 @@
+# Load Balancer HTTP(S) GCP + certificat managé (ManagedCertificate).
+# 1) Remplace weather-planner.example.com par ton FQDN (identique au ManagedCertificate).
+# 2) kubectl apply -f managed-certificate.yaml -f ingress.yaml
+# 3) Crée un enregistrement DNS A (ou AAAA) vers l’adresse IP de l’Ingress (kubectl get ingress).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: weather-planner-ingress
+  annotations:
+    networking.gke.io/managed-certificates: "weather-planner-cert"
+spec:
+  ingressClassName: gce
+  rules:
+    - host: weather-planner.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: weather-planner-svc
+                port:
+                  number: 80

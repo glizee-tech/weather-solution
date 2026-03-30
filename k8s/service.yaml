@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-planner-svc
+  labels:
+    app: weather-planner
+spec:
+  type: ClusterIP
+  selector:
+    app: weather-planner
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
