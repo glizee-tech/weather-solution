@@ -12,12 +12,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date as _date
+from itertools import combinations
 import math
 from typing import Any, Callable
 
 import requests
 
 BAN_SEARCH_URL = "https://data.geopf.fr/geocodage/search"
+BAN_REVERSE_URL = "https://data.geopf.fr/geocodage/reverse"
 OPENMETEO_METEOFRENCE_URL = "https://api.open-meteo.com/v1/meteofrance"
 OPENMETEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
@@ -115,6 +117,28 @@ def ban_geocode_address(address: str) -> tuple[float, float, str]:
         or props.get("name")
         or props.get("street")
         or address
+    )
+    return lat, lon, str(label)
+
+
+def ban_reverse_geocode(latitude: float, longitude: float) -> tuple[float, float, str]:
+    """
+    Géocodage inverse BAN : coordonnées WGS84 -> libellé d'adresse.
+    """
+    params = {"lat": latitude, "lon": longitude}
+    data = _http_get_json(BAN_REVERSE_URL, params=params)
+    features = data.get("features") or []
+    if not features:
+        raise GeocodingError("Aucune adresse à ces coordonnées.")
+
+    best = max(features, key=_feature_score)
+    lat, lon = _extract_lat_lon_from_ban_feature(best)
+    props = best.get("properties") or {}
+    label = (
+        props.get("label")
+        or props.get("name")
+        or props.get("street")
+        or f"{lat:.5f}, {lon:.5f}"
     )
     return lat, lon, str(label)
 
@@ -444,13 +468,20 @@ def get_weekly_running_plan(
     wind_threshold_kmh: float = 20.0,
     run_duration_hours: float = 0.5,
     recommended_per_day: int = 3,
-) -> tuple[str, list[tuple[str, list[HourlyForecast]]]]:
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> tuple[str, float, float, list[tuple[str, list[HourlyForecast]]]]:
     """
     Retourne:
     - label adresse
+    - latitude, longitude (WGS84)
     - liste de (date, liste 24h) sous forme de HourlyForecast
     """
-    lat, lon, label = ban_geocode_address(address)
+    if latitude is not None and longitude is not None:
+        lat, lon = float(latitude), float(longitude)
+        label = address.strip() or f"{lat:.5f}, {lon:.5f}"
+    else:
+        lat, lon, label = ban_geocode_address(address)
 
     # Base: /forecast pour couvrir toute la semaine.
     forecast_hours = openmeteo_fetch_forecast_hourly(lat, lon, forecast_days=7)
@@ -489,7 +520,7 @@ def get_weekly_running_plan(
     # On renvoie aussi les heures pour pouvoir faire un affichage horaire detaille.
     _ = recommended_per_day
 
-    return label, per_day
+    return label, lat, lon, per_day
 
 
 def _hour_ok(h: HourlyForecast, *, rain_threshold_mm_per_h: float, wind_threshold_kmh: float) -> bool:
@@ -804,3 +835,256 @@ def format_weekly_running_plan_message(
         )
 
     return "\n".join(lines)
+
+
+def _compute_window_stats(
+    window: list[HourlyForecast],
+) -> tuple[float, float]:
+    if not window:
+        return 0.0, 0.0
+    avg_precip = sum(float(x.precipitation_mm or 0.0) for x in window) / float(len(window))
+    max_wind = 0.0
+    for x in window:
+        eff = _hour_effective_wind_kmh(x) or 0.0
+        max_wind = max(max_wind, float(eff))
+    return avg_precip, max_wind
+
+
+def _best_window_candidate_per_day(sorted_candidates: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    best: dict[str, dict[str, Any]] = {}
+    for c in sorted_candidates:
+        d = c["date"]
+        if d not in best:
+            best[d] = c
+    return best
+
+
+def _sorted_day_ordinals(iso_dates: tuple[str, ...]) -> list[int]:
+    return sorted(_date.fromisoformat(d).toordinal() for d in iso_dates)
+
+
+def _respects_min_day_gap_between_sessions(iso_dates: tuple[str, ...], min_ordinal_gap: int) -> bool:
+    """Écart minimal entre deux dates consécutives (triées), en jours calendaires."""
+    if len(iso_dates) < 2:
+        return True
+    ordinals = _sorted_day_ordinals(iso_dates)
+    return all(ordinals[i + 1] - ordinals[i] >= min_ordinal_gap for i in range(len(ordinals) - 1))
+
+
+def _exit_plan_combo_rank(
+    iso_dates: tuple[str, ...],
+    day_best: dict[str, dict[str, Any]],
+) -> tuple[int, float, float, float, float, float, float, int, int]:
+    """
+    Clé pour max() : d'abord la météo (éviter pluie / mauvaises conditions), puis l'espacement.
+    """
+    ords = _sorted_day_ordinals(iso_dates)
+    if len(ords) < 2:
+        min_gap = 999
+        span = 0
+    else:
+        gaps = [ords[i + 1] - ords[i] for i in range(len(ords) - 1)]
+        min_gap = min(gaps)
+        span = ords[-1] - ords[0]
+
+    strict_n = sum(1 for d in iso_dates if day_best[d]["strict_ok"])
+    penalties = [float(day_best[d]["penalty"]) for d in iso_dates]
+    pen_sum = sum(penalties)
+    max_pen = max(penalties) if penalties else 0.0
+
+    precs = [float(day_best[d]["avg_precipitation_mm"]) for d in iso_dates]
+    max_prec = max(precs) if precs else 0.0
+    sum_prec = sum(precs)
+
+    winds = [float(day_best[d]["max_wind_kmh"]) for d in iso_dates]
+    max_wind = max(winds) if winds else 0.0
+    sum_wind = sum(winds)
+
+    return (
+        strict_n,
+        -pen_sum,
+        -max_pen,
+        -max_prec,
+        -sum_prec,
+        -max_wind,
+        -sum_wind,
+        min_gap,
+        span,
+    )
+
+
+def pick_spaced_exit_plan(
+    sorted_candidates: list[dict[str, Any]],
+    recommended_per_week: int,
+) -> list[dict[str, Any]]:
+    """
+    Plan de sortie : au plus une séance par jour (plafond 7 jours).
+
+    - 2 ou 3 séances : jamais deux jours calendaires consécutifs (au moins un jour d'écart).
+    - 4 à 7 séances : pas plus d'une par jour ; on privilégie les jours les plus favorables
+      (seuils respectés, peu de pluie / vent), puis l'espacement entre jours.
+
+    Pour chaque jour retenu, on prend le meilleur créneau de ce jour (tri météo dans ``sorted_candidates``).
+    """
+    if not sorted_candidates:
+        return []
+
+    day_best = _best_window_candidate_per_day(sorted_candidates)
+    dates_sorted = sorted(day_best.keys())
+    n_want = max(1, recommended_per_week)
+    max_slots = min(n_want, 7, len(dates_sorted))
+
+    def min_ordinal_gap_for_count(nb: int) -> int | None:
+        if nb in (2, 3):
+            return 2  # pas le lendemain : écart ordinal >= 2
+        return None
+
+    for target_n in range(max_slots, 0, -1):
+        gap_req = min_ordinal_gap_for_count(target_n)
+        best_combo: tuple[str, ...] | None = None
+        best_rank: tuple[Any, ...] | None = None
+        for combo in combinations(dates_sorted, target_n):
+            if gap_req is not None and not _respects_min_day_gap_between_sessions(combo, gap_req):
+                continue
+            rank = _exit_plan_combo_rank(combo, day_best)
+            if best_rank is None or rank > best_rank:
+                best_rank = rank
+                best_combo = combo
+        if best_combo is not None:
+            return [day_best[d] for d in sorted(best_combo)]
+
+    return [day_best[dates_sorted[0]]]
+
+
+def build_weekly_plan_payload(
+    *,
+    address: str,
+    rain_threshold_mm_per_h: float,
+    wind_threshold_kmh: float,
+    run_duration_hours: float,
+    weekday_start_h: int,
+    weekday_end_h: int,
+    weekend_start_h: int,
+    weekend_end_h: int,
+    recommended_per_week: int,
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> dict[str, Any]:
+    """
+    Version sérialisable JSON pour l'interface web.
+    """
+    label, lat, lon, per_day = get_weekly_running_plan(
+        address,
+        rain_threshold_mm_per_h=rain_threshold_mm_per_h,
+        wind_threshold_kmh=wind_threshold_kmh,
+        run_duration_hours=run_duration_hours,
+        latitude=latitude,
+        longitude=longitude,
+    )
+
+    window_hours = max(1, int(math.ceil(run_duration_hours)))
+    days_payload: list[dict[str, Any]] = []
+    all_candidates: list[dict[str, Any]] = []
+
+    for iso_date, hours in per_day:
+        is_we = _is_weekend(iso_date)
+        start_h = weekend_start_h if is_we else weekday_start_h
+        end_h = weekend_end_h if is_we else weekday_end_h
+
+        hour_cells: list[dict[str, Any]] = []
+        for h in hours:
+            hh = int(h.hour[:2]) if h.hour and len(h.hour) >= 2 else -1
+            available = _hour_in_range(h.hour, start_h, end_h)
+            s = score_hour(
+                h,
+                rain_threshold_mm_per_h=rain_threshold_mm_per_h,
+                wind_threshold_kmh=wind_threshold_kmh,
+            )
+            eff_wind = _hour_effective_wind_kmh(h)
+            dir_compass = _deg_to_compass_16(h.wind_direction_deg) if h.wind_direction_deg is not None else None
+            hour_cells.append(
+                {
+                    "time": h.time,
+                    "hour_label": h.hour,
+                    "hour_int": hh,
+                    "score": s,
+                    "available": available,
+                    "precipitation_mm": h.precipitation_mm,
+                    "wind_speed_kmh": h.wind_speed_kmh,
+                    "wind_gust_kmh": h.wind_gust_kmh,
+                    "effective_wind_kmh": eff_wind,
+                    "wind_direction_deg": h.wind_direction_deg,
+                    "wind_direction_compass": dir_compass,
+                    "weather_code": h.weather_code,
+                }
+            )
+
+        # candidats de fenêtres
+        for i in range(0, max(0, len(hours) - window_hours + 1)):
+            window = hours[i : i + window_hours]
+            if not window:
+                continue
+            if not all(_hour_in_range(x.hour, start_h, end_h) for x in window):
+                continue
+            if not all((x.precipitation_mm is not None and x.wind_speed_kmh is not None) for x in window):
+                continue
+            avg_precip, max_wind = _compute_window_stats(window)
+            strict_ok = avg_precip <= rain_threshold_mm_per_h and max_wind <= wind_threshold_kmh
+            penalty = max(0.0, avg_precip - rain_threshold_mm_per_h) * 100.0 + max(0.0, max_wind - wind_threshold_kmh)
+            start = window[0]
+            all_candidates.append(
+                {
+                    "date": iso_date,
+                    "start_time": start.time,
+                    "start_hour_label": start.hour,
+                    "window_hours": window_hours,
+                    "avg_precipitation_mm": avg_precip,
+                    "max_wind_kmh": max_wind,
+                    "strict_ok": strict_ok,
+                    "penalty": penalty,
+                }
+            )
+
+        days_payload.append(
+            {
+                "date": iso_date,
+                "is_weekend": is_we,
+                "availability": {"start_hour": start_h, "end_hour": end_h},
+                "hours": hour_cells,
+            }
+        )
+
+    all_candidates.sort(
+        key=lambda c: (
+            0 if c["strict_ok"] else 1,
+            c["penalty"],
+            c["avg_precipitation_mm"],
+            c["max_wind_kmh"],
+            c["date"],
+            c["start_time"],
+        )
+    )
+    recommendations = pick_spaced_exit_plan(all_candidates, recommended_per_week)
+
+    return {
+        "location": {
+            "address_input": address,
+            "label": label,
+            "latitude": lat,
+            "longitude": lon,
+            "from_coordinates": bool(latitude is not None and longitude is not None),
+        },
+        "settings": {
+            "rain_threshold_mm_per_h": rain_threshold_mm_per_h,
+            "wind_threshold_kmh": wind_threshold_kmh,
+            "run_duration_hours": run_duration_hours,
+            "window_hours": window_hours,
+            "weekday_start_h": weekday_start_h,
+            "weekday_end_h": weekday_end_h,
+            "weekend_start_h": weekend_start_h,
+            "weekend_end_h": weekend_end_h,
+            "recommended_per_week": recommended_per_week,
+        },
+        "days": days_payload,
+        "recommendations": recommendations,
+    }

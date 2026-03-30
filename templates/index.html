@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Running Planner V2</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Running Planner V2</h1>
+    <p>Adresse, carte de France, filtres personnalisés et heatmap hebdomadaire.</p>
+  </header>
+
+  <main class="layout">
+    <section class="panel controls">
+      <h2>Paramètres</h2>
+      <form id="plan-form">
+        <label>Adresse
+          <input id="address" name="address" type="text" placeholder="73 Avenue de Paris Saint-Mandé — ou clic sur la carte" />
+        </label>
+
+        <div class="row">
+          <label>Pluie moy max (mm/h)
+            <input id="rain" name="rain" type="number" step="0.1" value="0.5" min="0" />
+          </label>
+          <label>Vent max (km/h)
+            <input id="wind" name="wind" type="number" step="1" value="20" min="0" />
+          </label>
+        </div>
+
+        <div class="row">
+          <label>Durée course (h)
+            <input id="duration" name="duration" type="number" step="0.5" value="0.5" min="0.5" />
+          </label>
+          <label>Sorties / semaine
+            <input id="recommended" name="recommended" type="number" step="1" value="10" min="1" max="50" />
+          </label>
+        </div>
+
+        <fieldset>
+          <legend>Disponibilités semaine</legend>
+          <div class="row">
+            <label>Début
+              <input id="weekday-start" type="number" value="17" min="0" max="23" />
+            </label>
+            <label>Fin
+              <input id="weekday-end" type="number" value="20" min="1" max="24" />
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Disponibilités week-end</legend>
+          <div class="row">
+            <label>Début
+              <input id="weekend-start" type="number" value="9" min="0" max="23" />
+            </label>
+            <label>Fin
+              <input id="weekend-end" type="number" value="20" min="1" max="24" />
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="buttons">
+          <button type="button" id="btn-geocode">Localiser</button>
+          <button type="submit" id="btn-plan">Calculer le plan</button>
+        </div>
+      </form>
+      <p id="status"></p>
+    </section>
+
+    <section class="panel map-panel">
+      <h2>Carte</h2>
+      <div id="map"></div>
+      <p id="location-label"></p>
+    </section>
+  </main>
+
+  <section class="panel results">
+    <h2>Heatmap semaine (7x24)</h2>
+    <p>Clique sur les cases pour choisir les créneaux à conserver.</p>
+    <div id="heatmap"></div>
+  </section>
+
+  <section class="panel results two-col">
+    <div>
+      <h3>Creneaux sélectionnés</h3>
+      <ul id="selected-list"></ul>
+    </div>
+    <div>
+      <h3>Plan de sortie suggéré</h3>
+      <p class="plan-hint">Jusqu’à 7 sorties : au plus une par jour. On privilégie d’abord les jours les plus secs et les conditions sous tes seuils ; l’espacement entre jours vient ensuite. Pour 2 ou 3 sorties, au moins un jour d’écart entre deux dates (sauf si impossible avec les données).</p>
+      <ul id="recommended-list"></ul>
+    </div>
+  </section>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+

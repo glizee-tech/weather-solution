@@ -1,117 +1,73 @@
-# Weather Running Planner (BAN + Open-Meteo)
+# Running Planner V2 (interface web FastAPI)
 
-Outil CLI Python pour planifier des sorties course a pied sur 7 jours, a partir d'une adresse.
+Application web pour planifier des sorties course à pied sur 7 jours à partir d’une adresse en France (ou d’un point choisi sur la carte).
 
-Le programme combine :
-- **Geocodage BAN / Geoplateforme** pour convertir une adresse en coordonnees.
-- **Open-Meteo** pour recuperer la meteo horaire (pluie, vent, rafales, direction).
+## Fonctionnalités
 
-Il affiche :
-- une **heatmap heure par heure** (rouge -> a eviter, vert -> favorable),
-- des **creneaux recommandes** selon tes criteres,
-- et te laisse **selectionner manuellement** les creneaux a garder.
+- **Adresse** : géocodage direct (BAN / Géoplateforme) ou **clic sur la carte** (géocodage inverse) pour remplir le lieu.
+- **Carte** : Leaflet + fond OpenStreetMap, marqueur sur le lieu retenu.
+- **Filtres** : pluie max (mm/h), vent max (km/h, prise en compte des rafales), durée de sortie, plages horaires semaine / week-end, nombre de sorties souhaitées par semaine.
+- **Heatmap 7×24** : score heure par heure ; les créneaux dans tes plages « disponibles » sont mis en évidence ; libellés des jours en français (ex. *lundi 3 mars 2026*).
+- **Sélection manuelle** des créneaux ; pour chaque créneau choisi, **flèche de vent** (direction d’où vient le vent, convention météo).
+- **Plan de sortie suggéré** : jusqu’à une sortie par jour (max 7) ; priorité aux **meilleures conditions** (pluie, vent, respect des seuils), puis espacement des jours ; pour 2 ou 3 sorties, au moins un jour d’écart entre deux dates quand c’est possible.
 
----
+## Prérequis
 
-## 1) Prerequis
+- Python 3.11+
+- Windows / PowerShell (ou environnement compatible)
 
-- Python 3.11+ (3.13 teste ici)
-- Windows / PowerShell (ou autre shell compatible Python)
-
----
-
-## 2) Installation
-
-Depuis la racine du projet :
+## Installation
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
 ```
 
----
+## Lancement
 
-## 3) Lancer l'application
+À la racine du projet :
 
 ```powershell
-.\.venv\Scripts\python chatbot.py
+.\.venv\Scripts\uvicorn app:app --reload
 ```
 
-Le bot demande ensuite :
-1. **Adresse** (d'abord)
-2. **Reglages principaux** (persistants dans la session) :
-   - horaires dispo semaine
-   - horaires dispo week-end
-3. **Nombre de sorties souhaitees sur la semaine**
-4. **Filtres meteo** :
-   - pluie moyenne max (mm/h)
-   - vent maximum max (km/h, vent ou rafales)
-   - duree de course
+Ouvrir [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
----
+## Utilisation
 
-## 4) Lecture de la heatmap
+1. Saisir une adresse et cliquer sur **Localiser**, ou **cliquer sur la carte** pour remplir l’adresse automatiquement.
+2. Ajuster les paramètres (pluie, vent, durée, disponibilités, sorties / semaine).
+3. Cliquer sur **Calculer le plan**.
+4. Consulter la heatmap, le **plan de sortie suggéré** et cliquer les cases pour constituer ta propre sélection de créneaux.
 
-- Affichage sur **toute la journee** (00h -> 23h), pour chaque jour de la semaine.
-- Couleur :
-  - **vert** = meilleur creneau potentiel
-  - **rouge** = creneau a eviter
-- Le score depend surtout de :
-  - pluie (au-dessus du seuil choisi)
-  - vent max (vent/rafales au-dessus du seuil choisi)
+## APIs externes
 
-Si ton terminal ne gere pas bien les couleurs ANSI, la heatmap peut apparaître degradee.
+| Service | Rôle |
+|--------|------|
+| **BAN** — `https://data.geopf.fr/geocodage/search` | Adresse → coordonnées |
+| **BAN** — `https://data.geopf.fr/geocodage/reverse` | Clic carte → adresse |
+| **Open-Meteo** — `https://api.open-meteo.com/v1/forecast` | Prévisions horaires sur la semaine (base) |
+| **Open-Meteo** — `https://api.open-meteo.com/v1/meteofrance` | Modèles Météo-France (AROME / ARPEGE) pour les premiers jours, **fusionnés** avec le forecast quand l’appel réussit ; sinon seul le forecast est utilisé |
 
----
+Aucune clé API n’est nécessaire pour ces services dans cette version. Aucun fichier `.env` n’est requis.
 
-## 5) Selection manuelle des creneaux
+## Endpoints HTTP (local)
 
-Apres la heatmap, tu peux choisir les creneaux a conserver :
+| Méthode | Chemin | Description |
+|---------|--------|-------------|
+| `GET` | `/` | Interface web |
+| `POST` | `/api/geocode` | Corps JSON `{ "address": "…" }` |
+| `POST` | `/api/reverse` | Corps JSON `{ "latitude": …, "longitude": … }` |
+| `POST` | `/api/plan` | Paramètres du formulaire ; `address` peut être vide si `latitude` et `longitude` sont fournis |
 
-- Ajouter une heure :
-  - `add 2026-04-01 18`
-- Ajouter une plage :
-  - `add 2026-04-01 17-20`
-- Supprimer :
-  - `del 2026-04-01 18`
-  - `del 2026-04-01 17-20`
-- Lister la selection :
-  - `list`
-- Terminer :
-  - `done`
+## Structure du projet
 
-Format attendu des creneaux :
-- `YYYY-MM-DD HH`
-- ou plage `YYYY-MM-DD HH-HH`
+- `app.py` — FastAPI, routes et validation des requêtes
+- `templates/index.html` — page unique
+- `static/app.js` — carte, heatmap, appels API
+- `static/styles.css` — mise en forme
+- `weather_client.py` — géocodage, Open-Meteo, scoring, payload JSON (plan, recommandations)
 
----
+## Notes
 
-## 6) APIs utilisees
-
-- BAN / Geoplateforme geocodage :
-  - `https://data.geopf.fr/geocodage/search`
-- Open-Meteo forecast :
-  - `https://api.open-meteo.com/v1/forecast`
-- Open-Meteo meteofrance (si dispo) :
-  - `https://api.open-meteo.com/v1/meteofrance`
-
-Notes :
-- Le code utilise un fallback si l'endpoint `meteofrance` est indisponible.
-- Pas de cle API obligatoire pour cette version.
-
----
-
-## 7) Fichiers principaux
-
-- `chatbot.py` : interface CLI interactive
-- `weather_client.py` : appels API, scoring, heatmap, recommandations
-- `requirements.txt` : dependances Python
-
----
-
-## 8) Limitations actuelles
-
-- App CLI (pas d'interface web).
-- Score heuristique (pratique, mais pas un modele sportif/medical).
-- Selon la qualite du terminal, le rendu couleur peut varier.
-
+- Les scores et suggestions sont **heuristiques** : aide à la décision, pas conseil médical ni sportif professionnel.
