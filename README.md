@@ -2,6 +2,23 @@
 
 Application web pour planifier des sorties course à pied sur 7 jours à partir d’une adresse en France (ou d’un point choisi sur la carte).
 
+## Statut du projet
+
+Projet de démonstration finalisé.  
+Le repository est conservé comme base de référence technique (FastAPI + GKE + CI/CD GitHub Actions).
+
+Pour une reprise rapide en environnement cloud:
+
+```bash
+bash start_app.sh
+```
+
+Pour arrêter les coûts:
+
+```bash
+bash stop_costs.sh
+```
+
 ## Fonctionnalités
 
 - **Adresse** : géocodage direct (BAN / Géoplateforme) ou **clic sur la carte** (géocodage inverse) pour remplir le lieu.
