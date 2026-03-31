@@ -68,11 +68,11 @@ Aucune clé API n’est nécessaire pour ces services dans cette version. Aucun 
 - `static/styles.css` — mise en forme
 - `weather_client.py` — géocodage, Open-Meteo, scoring, payload JSON (plan, recommandations)
 - `Dockerfile` — image de production (Uvicorn)
-- `k8s/` — manifests GKE (Deployment, Service, Ingress HTTPS, ManagedCertificate)
+- `k8s/` — manifests GKE (Deployment, Service `LoadBalancer`)
 
-## Déploiement GCP — GKE Autopilot, région France, HTTPS
+## Déploiement GCP — GKE Autopilot, région France (sans domaine)
 
-Région cible : **`europe-west9`** (Paris). Tu as besoin d’un **nom de domaine** dont tu gères le DNS (pour le certificat Google).
+Région cible : **`europe-west9`** (Paris). Cette version expose l'app en HTTP via une IP publique (pas de nom de domaine requis).
 
 ### 1. Prérequis côté GCP
 
@@ -116,40 +116,53 @@ docker push europe-west9-docker.pkg.dev/PROJECT_ID/weather-planner/app:latest
 ### 4. Kubernetes
 
 1. Dans `k8s/deployment.yaml`, remplace `PROJECT_ID` dans le champ `image` par ton vrai projet (et le tag si besoin).
-2. Dans `k8s/managed-certificate.yaml` et `k8s/ingress.yaml`, remplace `weather-planner.example.com` par ton **FQDN** (même valeur partout).
-
 Applique les manifests :
 
 ```bash
 kubectl apply -f k8s/deployment.yaml
 kubectl apply -f k8s/service.yaml
-kubectl apply -f k8s/managed-certificate.yaml
-kubectl apply -f k8s/ingress.yaml
 ```
 
-Récupère l’**adresse IP** du load balancer (affiche `ADDRESS` une fois prêt) :
+Récupère l’**IP publique** du Service (affiche `EXTERNAL-IP` une fois prêt) :
 
 ```bash
-kubectl get ingress weather-planner-ingress -w
+kubectl get svc weather-planner-svc -w
 ```
 
-### 5. DNS et certificat TLS
+Quand l'IP est attribuée, ouvre :
 
-1. Chez ton hébergeur DNS, crée un enregistrement **A** (ou **AAAA** si IPv6) : nom = ton sous-domaine, valeur = l’IP de l’Ingress.
-2. Attends la propagation DNS ; le `ManagedCertificate` passe à l’état **Active** (plusieurs minutes à quelques dizaines de minutes). Vérifie avec :
-
-```bash
-kubectl describe managedcertificate weather-planner-cert
+```text
+http://EXTERNAL-IP
 ```
 
-3. Accède ensuite à `https://ton-sous-domaine...` (HTTP redirige souvent vers HTTPS une fois le certificat actif).
+### 5. Coûts
 
-**Remarque** : tant que le DNS ne pointe pas vers la bonne IP, le certificat reste en provisioning.
-
-### 6. Coûts
-
-Autopilot et le **load balancer HTTPS** sont facturables (cluster, transfert, règles LB, etc.). Consulter la [calculatrice de prix GCP](https://cloud.google.com/products/calculator).
+Autopilot et le **Service LoadBalancer** sont facturables (cluster, transfert, load balancer, etc.). Consulter la [calculatrice de prix GCP](https://cloud.google.com/products/calculator).
 
 ## Notes
 
 - Les scores et suggestions sont **heuristiques** : aide à la décision, pas conseil médical ni sportif professionnel.
+
+## CI/CD GitHub Actions (push sur `master`)
+
+Le workflow `.github/workflows/deploy-master.yml` déploie automatiquement l'API sur GKE à chaque push sur `master` :
+
+1. Authentification à GCP via Workload Identity Federation
+2. Build et push de l'image Docker vers Artifact Registry (tag = `GITHUB_SHA`)
+3. Update de l'image du `Deployment` Kubernetes + vérification du rollout
+
+### Variables GitHub à créer (Repository variables)
+
+- `GCP_PROJECT_ID` : id du projet GCP (ex: `weather-interface`)
+- `GKE_CLUSTER` : nom du cluster (ex: `weather-planner`)
+- `GKE_REGION` : région du cluster (ex: `europe-west9`)
+- `GAR_LOCATION` : région Artifact Registry (ex: `europe-west9`)
+- `GAR_REPOSITORY` : dépôt Artifact Registry (ex: `weather-planner`)
+- `K8S_NAMESPACE` : namespace Kubernetes (optionnel, défaut: `default`)
+- `K8S_DEPLOYMENT` : nom du Deployment (optionnel, défaut: `weather-planner`)
+- `K8S_CONTAINER` : nom du container dans le Deployment (optionnel, défaut: `weather-planner`)
+
+### Secrets GitHub à créer (Repository secrets)
+
+- `GCP_WIF_PROVIDER` : ressource Workload Identity Provider (format complet `projects/.../providers/...`)
+- `GCP_SERVICE_ACCOUNT` : email du service account utilisé par GitHub Actions

@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 .pytest_cache/
 explication_code/
+k8s/.managed-certificate.yaml

@@ -6,7 +6,7 @@ metadata:
   labels:
     app: weather-planner
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: weather-planner
@@ -18,7 +18,7 @@ spec:
       containers:
         - name: weather-planner
           # Remplace par ton Artifact Registry après build/push
-          image: europe-west9-docker.pkg.dev/PROJECT_ID/weather-planner/app:latest
+          image: europe-west9-docker.pkg.dev/weather-interface/weather-planner/app:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
