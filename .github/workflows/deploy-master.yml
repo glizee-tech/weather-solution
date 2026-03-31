@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 env:
-  PROJECT_ID: ${{ vars.GCP_ PROJECT_ID }}
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   GKE_CLUSTER: ${{ vars.GKE_CLUSTER }}
   GKE_REGION: ${{ vars.GKE_REGION }}
   GAR_LOCATION: ${{ vars.GAR_LOCATION }}
