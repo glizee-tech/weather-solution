@@ -139,6 +139,13 @@ http://EXTERNAL-IP
 
 Autopilot et le **Service LoadBalancer** sont facturables (cluster, transfert, load balancer, etc.). Consulter la [calculatrice de prix GCP](https://cloud.google.com/products/calculator).
 
+Pour arrêter les coûts puis relancer proprement, voir le guide: `docs/STOP_AND_RESTART_GCP.md`.
+
+Scripts prêts à l'emploi :
+
+- `./stop_costs.sh` : stoppe l'app et supprime le LoadBalancer (option `--delete-cluster` pour minimiser encore plus les coûts)
+- `./start_app.sh` : (re)crée le cluster si besoin, redéploie l'app et affiche l'URL HTTP publique
+
 ## Notes
 
 - Les scores et suggestions sont **heuristiques** : aide à la décision, pas conseil médical ni sportif professionnel.
